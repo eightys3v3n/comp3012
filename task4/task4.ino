@@ -7,33 +7,43 @@
  * But with other classes I didn't get past designing a better loop in time.
  */
 
-// Pins for the various LEDs
+
+// Global Constants
 const int NUM_LEDS = 10;
 const int LEDS[NUM_LEDS] = {2,3,4,5,6,7,8,9,10,11};
 const int DEPTH_PINS[2] = {12,13}; // Echo, Trigger.
 const int PING_TIME = 60; // milliseconds to measure distance over. >= 29.
 
+// Predeclare a function so I can put it in any order I wish.
+// This isn't done for all functions because the compiler didn't ask me to.
+// While it should be, I'm not sure why the compiler disallowed one function
+// and not the others.
 float getDistance(int delayBetweenPings=100);
 
+
+// Global Variables
 // How many LEDS are lit up [0-100]%?
 float percent = 0;
 // Are we lighting up (false) or turning off (true)?
 bool direction = false;
 
-// Configure LED pins and set their initial state.
+
+// Configure pin modes
 void setup() {
-  Serial.begin(115200);
-  Serial.print("Starting...       ");
+  /*Serial.begin(115200);
+  Serial.print("Starting...       ");*/
   
   for (int i = 0; i < NUM_LEDS; i++)
     pinMode(LEDS[i], OUTPUT);
-  Serial.println("Done");
+  // Serial.println("Done");
 
   pinMode(DEPTH_PINS[0], INPUT);
   pinMode(DEPTH_PINS[1], OUTPUT);
 }
 
 
+// Update the 10 segment LED to match the distance measured.
+// Currently maps the range 0-10cm to the display, anything more is just all on.
 void loop() {
   float distance = getDistance(PING_TIME);
 
@@ -42,10 +52,11 @@ void loop() {
 }
 
 
-void setLED(unsigned int i, bool mode) {
-  if (i >= NUM_LEDS)
+// Sets the LED at LEDS[l] to `mode`.
+void setLED(unsigned int l, bool mode) {
+  if (l >= NUM_LEDS)
     return;
-  if (i < 0)
+  if (l < 0)
     return;
   
   /*Serial.print(i);
@@ -54,6 +65,8 @@ void setLED(unsigned int i, bool mode) {
   digitalWrite(LEDS[i], mode);  
 }
 
+
+// Sets that percent of the LEDs to on and the rest to off.
 void setPercent(float percent) {
   unsigned int leds = map(percent, 0, 100, 0, NUM_LEDS);
   /*Serial.print("Percent mapped to ");
