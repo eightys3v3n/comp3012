@@ -1,10 +1,8 @@
 /* Author: Terrence Plunkett
  * Date: 2021-02-04
  *
- * Should improve upon by utilizing a game loop structure for state changes.
- * That is, the loop should not wait while doing an action on one LED. This
- * limits the number of concurrent changes to one LED and its inefficient.
- * But with other classes I didn't get past designing a better loop in time.
+ * Sets the light up level of a 10 segment LED display utilizing the output from a
+ * depth sensor.
  */
 
 
