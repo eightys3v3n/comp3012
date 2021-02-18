@@ -1,127 +1,191 @@
 /* Author: Terrence Plunkett
- * Date: 2021-02-04
+ * Date: 2021-02-18
  *
+ * Utilizes a DHT11 humidity sensor, an LCD display, an IR receiver and remote, and a 10K potentiometer.
+ * Potentiometer is used to control LCD contrast, LCD displays DHT11 readings, and IR remote turns on and off the LCD.
  */
 
+// automated timer based events
+#include <Automaton.h>
 
-// Global Constants
-const int NUM_LEDS = 10;
-const int LEDS[NUM_LEDS] = {2,3,4,5,6,7,8,9,10,11};
-const int DEPTH_PINS[2] = {12,13}; // Echo, Trigger.
-const int PING_TIME = 60; // milliseconds to measure distance over. >= 29.
+// Usage of DHT sensor
+#include <DHT.h>
+#include <DHT_U.h>
+#include <Adafruit_Sensor.h>
 
-// Predeclare a function so I can put it in any order I wish.
-// This isn't done for all functions because the compiler didn't ask me to.
-// While it should be, I'm not sure why the compiler disallowed one function
-// and not the others.
-float getDistance(int delayBetweenPings=100);
+// IR Receiver
+#include <IRremote.h>
+
+// LCD Display
+#include <Adafruit_LiquidCrystal.h>
 
 
 // Global Variables
-// How many LEDS are lit up [0-100]%?
-float percent = 0;
-// Are we lighting up (false) or turning off (true)?
-bool direction = false;
+// DHT Sensor
+#define DHT_PIN 2
+#define DHTTYPE DHT11
+DHT_Unified DHTDevice(DHT_PIN, DHTTYPE);
+sensor_t HumidSensor, TempSensor;
+Atm_timer DHTTimer;
+double humidity, temperature;
+
+// IR Receiver
+#define IR_PIN 3
+#define IR_CHECK_INTERVAL 600 // check for received codes every this many ms
+Atm_timer IRTimer;
+long last_press_time = 0; // time when button was last pressed
+
+// LCD Display
+#define LCD_RS 13
+#define LCD_E  12
+#define LCD_D4 11
+#define LCD_D5 10
+#define LCD_D6 9
+#define LCD_D7 8
+#define LCD_CONTRAST 6
+#define LCD_CONTRAST_INPUT A0
+#define LCD_UPDATE_INTERVAL 2000
+#define LCD_CONTRAST_UPDATE_INTERVAL 400 // contrast updating
+Adafruit_LiquidCrystal LCD(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+bool lcd_on = true;
+byte lcd_contrast = 0;
+Atm_timer LCDTimer, ContrastTimer;
 
 
-// Configure pin modes
+// Configure pin modes and schedule callbacks
 void setup() {
-  /*Serial.begin(115200);
-  Serial.print("Starting...       ");*/
-  
-  for (int i = 0; i < NUM_LEDS; i++)
-    pinMode(LEDS[i], OUTPUT);
-  // Serial.println("Done");
+  Serial.begin(115200);
+  Serial.println("Starting...");
 
-  pinMode(DEPTH_PINS[0], INPUT);
-  pinMode(DEPTH_PINS[1], OUTPUT);
+  LCDSetup();
+  IRSetup();
+  DHTSetup();
+
+  Serial.println("Done");
 }
 
-
-// Update the 10 segment LED to match the distance measured.
-// Currently maps the range 0-10cm to the display, anything more is just all on.
+// do call backs via automaton
 void loop() {
-  float distance = getDistance(PING_TIME);
-
-  percent = map(distance, 0, 10, 0, 100);
-  setPercent(percent);
+  automaton.run();
 }
 
 
-// Sets the LED at LEDS[l] to `mode`.
-void setLED(unsigned int l, bool mode) {
-  if (l >= NUM_LEDS)
-    return;
-  if (l < 0)
-    return;
-  
-  /*Serial.print(i);
-  Serial.print(", ");
-  Serial.println(mode);*/
-  digitalWrite(LEDS[i], mode);  
+// Start the LCD display and associated timer based callbacks
+void LCDSetup() {
+  pinMode(LCD_CONTRAST, OUTPUT);
+  pinMode(LCD_CONTRAST_INPUT, INPUT);
+
+  LCD.begin(16,2);
+  LCD.noBlink();
+  LCD.noCursor();
+
+  Serial.print("  Updating LCD every "); Serial.print(LCD_UPDATE_INTERVAL); Serial.println("ms");
+  LCDTimer.begin(LCD_UPDATE_INTERVAL)
+    .repeat(-1)
+    .onTimer(LCDUpdate)
+    .start();
+  Serial.print("  Updating LCD Contrast every "); Serial.print(LCD_CONTRAST_UPDATE_INTERVAL); Serial.println("ms");
+  ContrastTimer.begin(LCD_CONTRAST_UPDATE_INTERVAL)
+    .repeat(-1)
+    .onTimer(ContrastUpdate)
+    .start();
+}
+
+void ContrastUpdate() {
+  // Set contrast
+  lcd_contrast = map(analogRead(LCD_CONTRAST_INPUT), 0, 1023, 0, 255);
+  analogWrite(LCD_CONTRAST, lcd_contrast);
+}
+
+// Writes the temperature and humidity out to the display
+void LCDUpdate() {
+  LCD.setCursor(0, 0);
+  LCD.print("                ");
+  LCD.setCursor(0, 0);
+  LCD.print("Humid ");
+  LCD.print(String(humidity));
+  LCD.setCursor(0, 1);
+  LCD.print("                ");
+  LCD.setCursor(0, 1);
+  LCD.print("Temp ");
+  LCD.print(String(temperature));
+  LCD.setCursor(15,1);
+}
+
+// turns on or off the LCD display (doesn't turn off the backlight)
+void toggleLCD() {
+  if (lcd_on) {
+    LCD.noDisplay();
+    lcd_on = false;
+  } else {
+    LCD.display();
+    lcd_on = true;
+  }
 }
 
 
-// Sets that percent of the LEDs to on and the rest to off.
-void setPercent(float percent) {
-  unsigned int leds = map(percent, 0, 100, 0, NUM_LEDS);
-  /*Serial.print("Percent mapped to ");
-  Serial.print(percent);
-  Serial.print("->");
-  Serial.println(leds);*/
+// Start the IR receiver and schedule timed callback
+void IRSetup() {
+  IrReceiver.begin(IR_PIN);
 
-  for (unsigned int l=0; l < NUM_LEDS; l++) {
-    if (l < leds)
-      setLED(l, LOW);
-    else
-      setLED(l, HIGH);
-  }  
+  Serial.print("  Checking IR Sensor every "); Serial.print(IR_CHECK_INTERVAL); Serial.println("ms");
+  IRTimer.begin(IR_CHECK_INTERVAL)
+    .repeat(-1)
+    .onTimer(IRUpdate)
+    .start();
 }
 
-//-----------------------------------------------
-//retunrs a distance reading from an attached 
-//HC_SR04 ultrasong sensor
-//param: delpayBetweenPings will default to 100
-//       if left blank. 
-//       Smallest value should be 29.
-// Written by Jordan Kidney, borrowed from example code for week 5 of COMP 3012 in Winter of 2021.
-float getDistance(int delayBetweenPings=100)
-{
-  unsigned long pingTime;
-  float distance;
- 
-  //clear trigger pin
-  digitalWrite(DEPTH_PINS[1], LOW);
-  delayMicroseconds(2);
-  
-  //make the trig pin output High for 10 microseconds
-  //to trigger the HC_SR04
-  digitalWrite(DEPTH_PINS[1], HIGH);
-  delayMicroseconds(10);
-  digitalWrite(DEPTH_PINS[1], LOW);
- 
-  //wait for the HC_SR04 to return a HIGH level
-  //signal and measure how long it took to get a  
-  //signal back.
-  pingTime = pulseIn(DEPTH_PINS[0], HIGH); 
-  
-  //calculate distance based upon pingTime based upon
-  //known speed of sound
-  
-  //seed of sound ( v = 340 m/s = 0.034 cm/ microsecond)
-  
-  distance = pingTime*0.034/2;
+// Check for IR data and act on it
+void IRUpdate(int idx, int v, int up) {
+  if (IrReceiver.decode()) {
+    switch (IrReceiver.decodedIRData.command) {
+    case 0x44:
+      Serial.println("Pressed test");
+      break;
+    case 69:
+      toggleLCD();
+      break;
+    default:
+      Serial.print("Pressed unused button "); Serial.println(IrReceiver.decodedIRData.command);
+    }
+
+    IrReceiver.resume();
+  }
+}
 
 
-  //if distance goes above 400, just assume a large
-  //objects is closer than 2cm (the min)
+// Starts the DHT sensor and schedules a callback to save the value
+void DHTSetup() {
+  pinMode(DHT_PIN, INPUT);
+  
+  DHTDevice.begin();
+  DHTDevice.humidity().getSensor(&HumidSensor);
 
-  if(distance > 400) distance = 0;
-             
-  //wait delayBetweenPings between next
-  //reading, a delay is needed to stop problems
-  //with trying to read ultrasonic too fast.
-  //Min should be 29.
-  delay(delayBetweenPings);
-  return distance;                  
+  Serial.print("  Updating DHT Sensor every "); Serial.print(HumidSensor.min_delay / 1000); Serial.println("ms");
+  DHTTimer.begin(HumidSensor.min_delay / 1000)
+    .repeat(-1)
+    .onTimer(DHTUpdate)
+    .start();
+}
+
+// Retrieves the humitity and temperature data from the DHTDevice and saves to global variables
+void DHTUpdate(int idx, int v, int up) {
+  sensors_event_t event;
+  DHTDevice.humidity().getEvent(&event);
+
+  if (!isnan(event.relative_humidity)) {
+    humidity = event.relative_humidity;
+    //Serial.print("Updated humidity sensor "); Serial.println(humidity);
+  } else {
+    //Serial.println("Failed to read humidity sensor");
+  }
+
+  DHTDevice.temperature().getEvent(&event);
+
+  if (!isnan(event.temperature)) {
+    temperature = event.temperature;
+    // Serial.print("Updated temperature sensor "); Serial.println(humidity);
+  } else {
+    // Serial.println("Failed to read temperature sensor");
+  }
 }
