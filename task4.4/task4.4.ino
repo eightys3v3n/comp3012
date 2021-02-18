@@ -19,6 +19,9 @@
 // LCD Display
 #include <Adafruit_LiquidCrystal.h>
 
+// Servo
+//#include "libraries/Atm_servo.h"
+
 
 // Global Variables
 // DHT Sensor
@@ -139,12 +142,14 @@ void IRSetup() {
 void IRUpdate(int idx, int v, int up) {
   if (IrReceiver.decode()) {
     switch (IrReceiver.decodedIRData.command) {
-    case 0x44:
+    case 0x44: // test
       Serial.println("Pressed test");
       break;
-    case 69:
+    
+    case 69: // power
       toggleLCD();
       break;
+
     default:
       Serial.print("Pressed unused button "); Serial.println(IrReceiver.decodedIRData.command);
     }
