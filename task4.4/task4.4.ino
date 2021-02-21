@@ -19,9 +19,6 @@
 // LCD Display
 #include <Adafruit_LiquidCrystal.h>
 
-// Servo
-//#include "libraries/Atm_servo.h"
-
 
 // Global Variables
 // DHT Sensor
